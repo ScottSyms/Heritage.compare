@@ -17,6 +17,25 @@ source = Table(
 
 print("Beginning translation ...  ")
 
+# Get maximum value for the pairid column
+max_pairid = dbcon.execute(select([source.c.pairid]).order_by(source.c.pairid.desc()).limit(1)).fetchone()[0]
+print(max_pairid)
+
+# Iterate through all the unique pairids
+for i in range(1, max_pairid):
+    print(i)
+
+    # Get all the rows with the same pairid
+    results = dbcon.execute(select([source.c.id, source.c.english, source.c.french, source.c.spanish]).where(source.c.pairid == i))
+
+    # Populate english, french, and spanish text variable
+
+    # Update each score column with the like language comparisons
+    
+
+
+
+
 # Modify English
-result = dbcon.execute(select(
-    [source.c.id, source.c.english, source.c.french, source.c.spanish]).limit(5))
+# result = dbcon.execute(select(
+#     [source.c.id, source.c.english, source.c.french, source.c.spanish]).limit(5))
