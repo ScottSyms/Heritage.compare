@@ -1,51 +1,130 @@
+##############################
+# Test comparison of mismatched texts
+# The first text in the spreadsheet is compared
+# against all the content.
+#
+# The first comparison is like text with the rest
+# being mismatched.
+
+MISALIGN = True
+
+# Remove stopwords from the text
+STOPWORDS = False
+
+##############################
+
+
 import warnings
 
 from bert_score import score
 from evaluate import load
-from sqlalchemy import (Boolean, Column, Date, DateTime, Float, Integer,
-                        MetaData, String, Table, Text, create_engine, inspect,
-                        update)
+
+if MISALIGN:
+    from nltk.corpus import stopwords
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    inspect,
+    update,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import select
 
+# Strip out stopwords
+if MISALIGN:
+    stopen = stopwords.words("english")
+    stopes = stopwords.words("spanish")
+    stopfr = stopwords.words("french")
+
 warnings.filterwarnings("ignore")
+warnings.simplefilter("ignore")
 
-# call bertscore and compare two variables
+
+# Comparison function
 def compare(text1, text2, language):
-    # while len(text1) > len(text2):
-    #     text2.append("")
-    # while len(text1) < len(text2):
-    #     text1.append("")
-    
+    if STOPWORDS:
+        # Strip out stopwords
+        if language == "en":
+            text1 = [
+                " ".join([word for word in text.split() if word not in stopen])
+                for text in text1
+            ]
+            text2 = [
+                " ".join([word for word in text.split() if word not in stopen])
+                for text in text2
+            ]
+        elif language == "es":
+            text1 = [
+                " ".join([word for word in text.split() if word not in stopes])
+                for text in text1
+            ]
+            text2 = [
+                " ".join([word for word in text.split() if word not in stopes])
+                for text in text2
+            ]
+        elif language == "fr":
+            text1 = [
+                " ".join([word for word in text.split() if word not in stopfr])
+                for text in text1
+            ]
+            text2 = [
+                " ".join([word for word in text.split() if word not in stopfr])
+                for text in text2
+            ]
+    else:
+        # Pad the shorter text with empty strings
+        while len(text1) > len(text2):
+            text2.append("")
+        while len(text1) < len(text2):
+            text1.append("")
+
+    # Return the F1 score from the comparison
     return score(
-        text1, text2, model_type="allenai/led-base-16384", rescale_with_baseline=True, lang=language
-    )
+        text1,
+        text2,
+        # model_type="allenai/led-base-16384",
+        # model_type="microsoft/deberta-xlarge-mnli",
+        # model_type="bert-base-multilingual-cased",
+        # model_type="distilbert-base-multilingual-cased",
+        model_type="t5-large",
+        rescale_with_baseline=True,
+        lang=language,
+    )[2].item()
 
-# Connect to database
+
+# Connect to SQLITEdatabase and intialize the session
 dbcon = create_engine(
-    "sqlite:////Users/scottsyms/code/HeritageCanada/data/fish/sample2.db"
+    "sqlite://///Users/scottsyms/code/HeritageCanada/data/checkingtext.db"
 )
-
-Base=declarative_base()
-
+Base = declarative_base()
 
 # Database access
 metadata = MetaData()
 source = Table("source", metadata, autoload=True, autoload_with=dbcon)
-# Session = sessionmaker(bind=dbcon)
-# session = Session()
 
-
-
-# Get maximum value for the pairid column
+# Each website pair has a unique id.
+# Get maximum value for the pairid value for further processing
 max_pairid = dbcon.execute(
     select([source.c.pairid]).order_by(source.c.pairid.desc()).limit(1)
 ).fetchone()[0]
-print(max_pairid)
+
+# Initialize the flag variable for MISALIGN processing
+flag = False
 
 # Iterate through all the unique pairids
-for i in range(1, max_pairid):
+for i in range(1, max_pairid + 1):
+    print("\n\nPairid: ", i, "\n", "------------------")
+
     # Get all the rows with the same pairid
     results = dbcon.execute(
         select(
@@ -53,87 +132,71 @@ for i in range(1, max_pairid):
         ).where(source.c.pairid == i)
     )
 
-    # print number of rows in results
     data = results.fetchall()
     returnrows = len(data)
 
-    # Iterate through all the rows in results
-
+    # If there are two rows, iterate through
+    # both rows in results
     if returnrows == 2:
-        print("Return Rows: ", returnrows)
+        rowcounter = 1
 
-        rowcounter=1
-        # Iterate through all the rows in results
+        # For loop to iterate through the rows
         for row in data:
             # Get the english and french text
-            print("Rowcounter: " , rowcounter)
+            print("Rowcounter: ", rowcounter)
+
             if rowcounter == 1:
-                print("Rowcount = 1")
+                if MISALIGN:
+                    if not flag:
+                        print("This is the first row.")
+                        frozenenglish1 = row[1]
+                        frozenfrench1 = row[2]
+                        frozenspanish1 = row[3]
+                        flag = True
+
+                # Retrieve the first row
                 english1 = row[1]
                 french1 = row[2]
                 spanish1 = row[3]
             else:
-                print("Rowcount = 2")
+                # Retrieve the second row
                 english2 = row[1]
                 french2 = row[2]
                 spanish2 = row[3]
-            rowcounter += 1
-            # Compare the two texts
 
-        # print("Length of English: " , len(english1), len(english2))
-        # print("Length of French: ", len(french1), len(french2))
-        # print("Length of Spanish: ", len(spanish1), len(spanish2))    
-        englishscore = compare([english1], [english2], "en")
-        frenchscore = compare([french1], [french2], "fr")
-        spanishscore = compare([spanish1], [spanish2], "es")
-        englishscore = sum([x[0].item() for x in englishscore])/3
-        frenchscore = sum([x[0].item() for x in frenchscore])/3
-        spanishscore = sum([x[0].item() for x in spanishscore])/3
+            # Increment the row counter
+            rowcounter += 1
+
+        print("Comparing: ", frozenenglish1[:50], english2[:50])
+
+        if MISALIGN:
+            # Test comparision- only the first comparison pair is like to like
+            # Subsequent comparisons are are against disparate texts
+            englishscore = compare([frozenenglish1], [english2], "en")
+            frenchscore = compare([frozenfrench1], [french2], "fr")
+            spanishscore = compare([frozenspanish1], [spanish2], "es")
+        else:
+            # Production comparision
+            englishscore = compare([english1], [english2], "en")
+            frenchscore = compare([french1], [french2], "fr")
+            spanishscore = compare([spanish1], [spanish2], "es")
+
+        # englishscore = sum([x[0].item() for x in englishscore])
+        # frenchscore = sum([x[0].item() for x in frenchscore])
+        # spanishscore = sum([x[0].item() for x in spanishscore])
 
         print("English Score: ", englishscore)
         print("French Score: ", frenchscore)
         print("Spanish Score: ", spanishscore)
 
-        stmt = source.update().values(bertscoreenglish=englishscore, bertscorefrench=frenchscore, bertscorespanish=spanishscore).where(source.c.pairid == i)
+        # Update the database with the scores
+        stmt = (
+            source.update()
+            .values(
+                bertscoreenglish=englishscore,
+                bertscorefrench=frenchscore,
+                bertscorespanish=spanishscore,
+            )
+            .where(source.c.pairid == i)
+        )
         dbcon.execute(stmt)
-
-        
-
-
-            # Compare the two texts
-
-print("English: ", english1)
-print ("French: ", french1)
-print ("Spanish: ", spanish1)
-
-print ("English: ", english2)
-print ("French: ", french2)
-print ("Spanish: ", spanish2)
-
-
-        # Get the spanish text
-
-
-    # Populate english, french, and spanish text variable
-
-    # Update each score column with the like language comparisons
-
-
-# Modify English
-# result = dbcon.execute(select(
-#     [source.c.id, source.c.english, source.c.french, source.c.spanish]).limit(5))
-
-
-text1='''
-After she obtained her AB, Key worked as an assistant in German and biology at Green Bay High School from 1894 to 1898.[13][14][15][16] She then attended the University of Chicago and was awarded her PhD in zoology in 1901.[9][11] She briefly remained at the University of Chicago as an assistant until 1902.[1] Afterwards she became the head of the German and Nature Study department at the New Mexico Normal University from 1903 to 1904.[17] After living in California for three years, she became a presiding teacher at Belmont College from 1907 to 1909.[12] She then became a professor of German and biology at Lombard college from 1909 to 1912[13][18] where she fostered Sewall Wright's interest in genetics.[19] They continued a correspondence throughout their lives.[20]
-'''
-
-text2='''
-From 1912 to 1914, Key worked as a eugenics field worker at the Eugenics Record Office.[18][1] Afterwards, she worked briefly as an investigator at the Public Charities Association in Pennsylvania.[21] From 1914 to 1917, she was an education director at the Pennsylvania State Training School in Polk.[21] As part of her position, she gave a talk on feeble-mindedness.[22] She also completed her seminal work "Feeble-minded Citizens in Pennsylvania," which was used to recommend appropriation from the Pennsylvania state legislature to isolate feeble-minded women from the population to prevent the spread of feeble-mindedness.[23]
-
-Later, Key worked as an archivist for three years.[21] From 1920 to 1925, she was the head of biology and eugenics research in the Race Betterment Foundation.[24] While there, she gave lectures[25] including topics "Hereditary and Human Fitness,"[26] "The Comparative effect on the Individual Heredity and Environment",[27] "Heredity and Personality",[28] "Are we better than our forefathers?",[29] "Our Friends, the Trees",[30] and "Heredity and Eugenics".[31] She spoke at the Battle Creek Garden Club on the importance of trees.
-'''
-
-fish =compare([text1], [text2])
-print(fish)
-print(fish[0].item())
